@@ -20,6 +20,8 @@ export interface BudsDevice {
   name: string | null;
   rssi: number | null;
   isSystemConnected?: boolean;
+  isSamsung?: boolean;
+  rawManufacturerData?: string | null;
 }
 
 export interface TouchControlsState {

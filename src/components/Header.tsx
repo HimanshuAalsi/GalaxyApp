@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useBudsStore } from '../store/useBudsStore';
 
 interface HeaderProps {
@@ -15,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect }) =
       case 'connected':
         return '#10b981'; // green
       case 'connecting':
+        return '#f59e0b'; // amber
       case 'scanning':
         return '#3b82f6'; // blue
       default:
@@ -25,7 +26,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect }) =
   const getStatusText = () => {
     switch (connectionState) {
       case 'connected':
-        return 'Connected';
+        return connectedDevice?.name || 'Connected';
       case 'connecting':
         return 'Connecting...';
       case 'scanning':
@@ -35,12 +36,52 @@ export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect }) =
     }
   };
 
+  const renderActionButton = () => {
+    if (connectionState === 'connected') {
+      return (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.disconnectBtn]}
+          onPress={onDisconnect}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.actionBtnText}>Disconnect</Text>
+        </TouchableOpacity>
+      );
+    }
+
+    if (connectionState === 'connecting') {
+      return (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.cancelBtn]}
+          onPress={onDisconnect}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.actionBtnText}>Cancel</Text>
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        style={[styles.actionButton, styles.connectBtn]}
+        onPress={onOpenScanner}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.actionBtnText}>Connect</Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <View>
         <Text style={styles.title}>Galaxy Buds2 Pro</Text>
         <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: getStatusColor() }]} />
+          {connectionState === 'connecting' ? (
+            <ActivityIndicator size="small" color="#f59e0b" style={styles.miniSpinner} />
+          ) : (
+            <View style={[styles.statusDot, { backgroundColor: getStatusColor() }]} />
+          )}
           <Text style={styles.statusText}>{getStatusText()}</Text>
           {connectionState === 'connected' && (
             <Text style={styles.firmwareBadge}>{firmwareVersion}</Text>
@@ -48,18 +89,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect }) =
         </View>
       </View>
 
-      <TouchableOpacity
-        style={[
-          styles.actionButton,
-          connectionState === 'connected' ? styles.disconnectBtn : styles.connectBtn,
-        ]}
-        onPress={connectionState === 'connected' ? onDisconnect : onOpenScanner}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.actionBtnText}>
-          {connectionState === 'connected' ? 'Disconnect' : 'Connect'}
-        </Text>
-      </TouchableOpacity>
+      {renderActionButton()}
     </View>
   );
 };
@@ -83,6 +113,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
   },
+  miniSpinner: {
+    marginRight: 6,
+    transform: [{ scale: 0.7 }],
+  },
   statusDot: {
     width: 8,
     height: 8,
@@ -98,16 +132,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     color: '#9ca3af',
     fontSize: 10,
+    fontWeight: '600',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
     marginLeft: 8,
-    fontFamily: 'monospace',
   },
   actionButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
+    minWidth: 88,
+    alignItems: 'center',
   },
   connectBtn: {
     backgroundColor: '#3b82f6',
@@ -115,10 +151,12 @@ const styles = StyleSheet.create({
   disconnectBtn: {
     backgroundColor: '#374151',
   },
+  cancelBtn: {
+    backgroundColor: '#b91c1c',
+  },
   actionBtnText: {
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '600',
   },
 });
-

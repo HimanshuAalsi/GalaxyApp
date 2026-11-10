@@ -6,6 +6,8 @@ import {
   SafeAreaView,
   StatusBar,
   View,
+  Text,
+  TouchableOpacity,
 } from 'react-native';
 import { Header } from '../components/Header';
 import { EarbudsGraphic } from '../components/EarbudsGraphic';
@@ -30,10 +32,9 @@ export const DashboardScreen: React.FC = () => {
   const dispatcher = CommandDispatcher.getInstance();
 
   useEffect(() => {
-    // Check BLE state and automatically attempt to discover paired iOS accessories
+    // Initial check: query paired system accessories and start an initial search
     (async () => {
       await bleService.ensurePoweredOn();
-      // Auto-scan once on startup to check for already-connected iOS earbuds
       await bleService.startScan();
     })();
   }, []);
@@ -44,9 +45,9 @@ export const DashboardScreen: React.FC = () => {
   };
 
   const handleSelectDevice = async (device: BudsDevice) => {
-    setIsScannerVisible(false);
     const connected = await bleService.connect(device.id);
     if (connected) {
+      setIsScannerVisible(false);
       setTimeout(async () => {
         await dispatcher.requestStatus();
       }, 500);
@@ -80,10 +81,30 @@ export const DashboardScreen: React.FC = () => {
           />
         }
       >
-        {/* App Bar & Link Button */}
+        {/* App Bar & Link / Cancel Button */}
         <Header onOpenScanner={handleOpenScanner} onDisconnect={handleDisconnect} />
 
-        {/* 3D Visual Depiction */}
+        {/* Pairing Assistant Notice Card when Disconnected */}
+        {connectionState !== 'connected' && (
+          <TouchableOpacity
+            style={styles.connectNoticeCard}
+            onPress={handleOpenScanner}
+            activeOpacity={0.8}
+          >
+            <View style={styles.noticeIconCircle}>
+              <Text style={styles.noticeIcon}>⚡</Text>
+            </View>
+            <View style={styles.noticeTextContainer}>
+              <Text style={styles.noticeTitle}>Link Buds2 Pro Settings</Text>
+              <Text style={styles.noticeSubtext}>
+                Open charging case lid with earbuds inside, then tap here to link live battery & controls.
+              </Text>
+            </View>
+            <Text style={styles.noticeArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Visual Depiction */}
         <EarbudsGraphic />
 
         {/* L / Case / R Battery & Placement Status */}
@@ -122,6 +143,7 @@ export const DashboardScreen: React.FC = () => {
         }}
         onSelectDevice={handleSelectDevice}
         onRefreshScan={() => bleService.startScan()}
+        onCancelConnection={handleDisconnect}
       />
     </SafeAreaView>
   );
@@ -134,6 +156,51 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 30,
+  },
+  connectNoticeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 6,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  noticeIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  noticeIcon: {
+    color: '#ffffff',
+    fontSize: 18,
+  },
+  noticeTextContainer: {
+    flex: 1,
+  },
+  noticeTitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  noticeSubtext: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  noticeArrow: {
+    color: '#60a5fa',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
   bottomSpacer: {
     height: 40,
