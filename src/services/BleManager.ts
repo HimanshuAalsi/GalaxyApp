@@ -12,7 +12,6 @@ export class BleService {
   private rxCharacteristicUuid: string = BLE_CONFIG.CHARACTERISTIC_RX_UUID;
   private serviceUuid: string = BLE_CONFIG.SAMSUNG_SERVICE_UUID;
 
-  // Callback to stream raw incoming bytes to CommandDispatcher / PacketFraming
   private onRawDataReceived?: (data: Uint8Array) => void;
 
   private constructor() {
@@ -30,30 +29,33 @@ export class BleService {
     this.onRawDataReceived = callback;
   }
 
-  /**
-   * Initializes Bluetooth adapter state listener.
-   */
   public async ensurePoweredOn(): Promise<boolean> {
-    const state = await this.manager.state();
-    if (state === 'PoweredOn') return true;
+    try {
+      const state = await this.manager.state();
+      if (state === 'PoweredOn') return true;
 
-    return new Promise((resolve) => {
-      const subscription = this.manager.onStateChange((newState) => {
-        if (newState === 'PoweredOn') {
-          subscription.remove();
-          resolve(true);
-        }
-      }, true);
-    });
+      return new Promise((resolve) => {
+        const subscription = this.manager.onStateChange((newState) => {
+          if (newState === 'PoweredOn') {
+            subscription.remove();
+            resolve(true);
+          }
+        }, true);
+      });
+    } catch (e) {
+      return false;
+    }
   }
 
   /**
-   * Scans for Galaxy Buds2 Pro peripherals.
+   * Dual-phase scanning:
+   * 1. CoreBluetooth connected peripherals retrieval (for earbuds already paired in iOS Settings).
+   * 2. Active BLE advertising scan (for earbuds in open case/pairing mode).
    */
   public async startScan(): Promise<void> {
     const isReady = await this.ensurePoweredOn();
     if (!isReady) {
-      useBudsStore.getState().logMessage('Bluetooth is not powered on');
+      useBudsStore.getState().logMessage('Bluetooth is not powered on.');
       return;
     }
 
@@ -61,7 +63,23 @@ export class BleService {
     useBudsStore.getState().setConnectionState('scanning');
     useBudsStore.getState().logMessage('Scanning for Galaxy Buds2 Pro...');
 
-    // Scan all devices and filter by name or service to ensure compatibility across firmware
+    // Phase 1: Check if already paired in iOS Bluetooth Settings
+    try {
+      const pairedPeripherals = await this.manager.connectedDevices(BLE_CONFIG.RETRIEVAL_SERVICES);
+      for (const dev of pairedPeripherals) {
+        useBudsStore.getState().addDiscoveredDevice({
+          id: dev.id,
+          name: dev.name || 'Galaxy Buds2 Pro (Paired)',
+          rssi: -40,
+          isSystemConnected: true,
+        });
+        useBudsStore.getState().logMessage(`Found paired iOS accessory: ${dev.name || dev.id}`);
+      }
+    } catch (e: any) {
+      // Ignore retrieval errors on devices with no connected devices
+    }
+
+    // Phase 2: Active scan for nearby advertising devices
     this.manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
       if (error) {
         useBudsStore.getState().logMessage(`Scan error: ${error.message}`);
@@ -72,17 +90,16 @@ export class BleService {
       if (device) {
         const name = device.name || device.localName;
         const matchesName = name && BLE_CONFIG.DEVICE_NAME_REGEX.test(name);
-        const matchesService =
-          device.serviceUUIDs &&
-          device.serviceUUIDs.some((uuid) =>
-            uuid.toLowerCase().includes(BLE_CONFIG.SHORT_SERVICE_UUID)
-          );
+        const matchesService = device.serviceUUIDs?.some((uuid) =>
+          BLE_CONFIG.RETRIEVAL_SERVICES.some((svc) => uuid.toLowerCase().includes(svc.toLowerCase()))
+        );
 
         if (matchesName || matchesService) {
           useBudsStore.getState().addDiscoveredDevice({
             id: device.id,
-            name: name || 'Galaxy Buds2 Pro (BLE)',
+            name: name || 'Galaxy Buds2 Pro',
             rssi: device.rssi,
+            isSystemConnected: false,
           });
         }
       }
@@ -103,7 +120,7 @@ export class BleService {
   }
 
   /**
-   * Connects to the designated Galaxy Buds peripheral and discovers services/characteristics.
+   * Connects to designated peripheral and resolves GATT characteristics
    */
   public async connect(deviceId: string): Promise<boolean> {
     try {
@@ -116,29 +133,23 @@ export class BleService {
       });
       this.activeDevice = connectedDevice;
 
-      // Monitor unexpected disconnection
-      connectedDevice.onDisconnected((error, dev) => {
+      connectedDevice.onDisconnected((error) => {
         useBudsStore.getState().setConnectionState('disconnected');
         useBudsStore.getState().setConnectedDevice(null);
         useBudsStore.getState().logMessage(`Disconnected: ${error?.message || 'Connection lost'}`);
         this.cleanup();
       });
 
-      // Discover GATT Services and Characteristics
       useBudsStore.getState().logMessage('Discovering GATT services...');
       await connectedDevice.discoverAllServicesAndCharacteristics();
 
-      // Request larger MTU for fast telemetry transfer
       try {
         await connectedDevice.requestMTU(BLE_CONFIG.TARGET_MTU);
       } catch (e) {
-        // iOS manages BLE MTU negotiation automatically; safe to continue
+        // iOS negotiates MTU automatically
       }
 
-      // Resolve Service and Characteristics
       await this.resolveGattEndpoints(connectedDevice);
-
-      // Start listening to notifications (RX)
       await this.startNotificationListener();
 
       useBudsStore.getState().setConnectionState('connected');
@@ -147,7 +158,7 @@ export class BleService {
         name: connectedDevice.name || 'Galaxy Buds2 Pro',
         rssi: null,
       });
-      useBudsStore.getState().logMessage('Connected and GATT stream established.');
+      useBudsStore.getState().logMessage('Connected! Real-time telemetry linked.');
 
       return true;
     } catch (error: any) {
@@ -159,43 +170,45 @@ export class BleService {
   }
 
   /**
-   * Locates the primary Samsung Wearable service and TX/RX characteristics,
-   * with automatic fallback detection for writeable and notifiable descriptors.
+   * Inspects all discovered services & characteristics to establish bidirectional communication
    */
   private async resolveGattEndpoints(device: Device): Promise<void> {
     const services = await device.services();
 
-    let matchedService = services.find((s) =>
-      s.uuid.toLowerCase().includes(BLE_CONFIG.SHORT_SERVICE_UUID)
+    let matchedService = services.find(
+      (s) =>
+        s.uuid.toLowerCase().includes('fd5a') ||
+        s.uuid.toLowerCase().includes('2e73') ||
+        s.uuid.toLowerCase().includes('fe2c')
     );
 
-    // Fallback: pick the first non-generic GATT service if 0xFD5A is masked
     if (!matchedService) {
-      matchedService = services.find(
-        (s) => !s.uuid.toLowerCase().startsWith('0000180') // Exclude Generic Access, Battery, etc.
-      );
+      // Pick first non-generic standard service
+      matchedService = services.find((s) => !s.uuid.toLowerCase().startsWith('0000180'));
+    }
+
+    if (!matchedService && services.length > 0) {
+      matchedService = services[0];
     }
 
     if (matchedService) {
       this.serviceUuid = matchedService.uuid;
       const characteristics = await matchedService.characteristics();
 
-      // Look for explicit Samsung characteristic UUIDs or infer by capability
       for (const char of characteristics) {
-        const uuidLower = char.uuid.toLowerCase();
-        if (uuidLower === BLE_CONFIG.CHARACTERISTIC_TX_UUID || (char.isWritableWithResponse || char.isWritableWithoutResponse)) {
+        if (char.isWritableWithResponse || char.isWritableWithoutResponse) {
           this.txCharacteristicUuid = char.uuid;
         }
-        if (uuidLower === BLE_CONFIG.CHARACTERISTIC_RX_UUID || (char.isNotifiable || char.isIndicatable)) {
+        if (char.isNotifiable || char.isIndicatable) {
           this.rxCharacteristicUuid = char.uuid;
         }
       }
+      useBudsStore
+        .getState()
+        .logMessage(`GATT Service: ${this.serviceUuid.slice(0, 8)} | TX: ${this.txCharacteristicUuid.slice(0, 8)} | RX: ${this.rxCharacteristicUuid.slice(0, 8)}`);
     }
   }
 
-  /**
-   * Subscribes to the RX characteristic to receive incoming telemetry packets.
-   */
   private async startNotificationListener(): Promise<void> {
     if (!this.activeDevice) return;
 
@@ -206,12 +219,11 @@ export class BleService {
       this.rxCharacteristicUuid,
       (error, characteristic) => {
         if (error) {
-          useBudsStore.getState().logMessage(`Notification error: ${error.message}`);
+          useBudsStore.getState().logMessage(`RX error: ${error.message}`);
           return;
         }
 
         if (characteristic?.value) {
-          // react-native-ble-plx yields base64 string
           const rawBuffer = Buffer.from(characteristic.value, 'base64');
           const uint8Array = new Uint8Array(rawBuffer.buffer, rawBuffer.byteOffset, rawBuffer.length);
           this.onRawDataReceived?.(uint8Array);
@@ -220,12 +232,9 @@ export class BleService {
     );
   }
 
-  /**
-   * Transmits raw framed byte array to the Galaxy Buds TX characteristic.
-   */
   public async write(bytes: Uint8Array): Promise<boolean> {
     if (!this.activeDevice) {
-      useBudsStore.getState().logMessage('Cannot send command: Device not connected.');
+      useBudsStore.getState().logMessage('Cannot write: Device not connected.');
       return false;
     }
 
@@ -237,8 +246,7 @@ export class BleService {
         base64Data
       );
       return true;
-    } catch (err: any) {
-      // Retry with response if writeWithoutResponse fails
+    } catch {
       try {
         const base64Data = Buffer.from(bytes).toString('base64');
         await this.activeDevice.writeCharacteristicWithResponseForService(
@@ -247,8 +255,8 @@ export class BleService {
           base64Data
         );
         return true;
-      } catch (retryErr: any) {
-        useBudsStore.getState().logMessage(`Write error: ${retryErr.message}`);
+      } catch (err: any) {
+        useBudsStore.getState().logMessage(`Write failed: ${err.message}`);
         return false;
       }
     }
@@ -271,4 +279,3 @@ export class BleService {
     this.activeDevice = null;
   }
 }
-

@@ -28,16 +28,24 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
   const renderItem = ({ item }: { item: BudsDevice }) => (
     <TouchableOpacity
-      style={styles.deviceRow}
+      style={[styles.deviceRow, item.isSystemConnected && styles.deviceRowPaired]}
       onPress={() => onSelectDevice(item)}
       activeOpacity={0.7}
     >
-      <View>
-        <Text style={styles.deviceName}>{item.name}</Text>
+      <View style={styles.deviceInfo}>
+        <View style={styles.nameRow}>
+          <Text style={styles.deviceName}>{item.name}</Text>
+          {item.isSystemConnected && (
+            <View style={styles.systemBadge}>
+              <Text style={styles.systemBadgeText}>iOS Paired</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.deviceId}>{item.id}</Text>
       </View>
-      <View style={styles.rssiBadge}>
-        <Text style={styles.rssiText}>{item.rssi ? `${item.rssi} dBm` : 'Nearby'}</Text>
+      <View style={styles.actionColumn}>
+        <Text style={styles.connectLabel}>Tap to Link →</Text>
+        {item.rssi && <Text style={styles.rssiText}>{item.rssi} dBm</Text>}
       </View>
     </TouchableOpacity>
   );
@@ -49,12 +57,19 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           {/* Header */}
           <View style={styles.header}>
             <View>
-              <Text style={styles.title}>Nearby Galaxy Buds</Text>
-              <Text style={styles.subtitle}>Select your Buds2 Pro to connect via BLE</Text>
+              <Text style={styles.title}>Galaxy Buds Devices</Text>
+              <Text style={styles.subtitle}>Select your Buds2 Pro to establish BLE link</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Quick Tip Banner */}
+          <View style={styles.tipBox}>
+            <Text style={styles.tipText}>
+              💡 If your buds are already connected in iPhone Settings, they will appear marked with "iOS Paired" above.
+            </Text>
           </View>
 
           {/* Device List */}
@@ -68,16 +83,16 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                 {isScanning ? (
                   <>
                     <ActivityIndicator size="large" color="#3b82f6" />
-                    <Text style={styles.emptyText}>Searching for Buds2 Pro...</Text>
+                    <Text style={styles.emptyText}>Scanning for Galaxy Buds...</Text>
                     <Text style={styles.emptySubtext}>
-                      Ensure earbuds are out of the case or case lid is open
+                      Open your charging case lid or ensure earbuds are in your ears
                     </Text>
                   </>
                 ) : (
                   <>
                     <Text style={styles.emptyText}>No Galaxy Buds detected</Text>
                     <Text style={styles.emptySubtext}>
-                      Open the charging case or hold both earbuds to enter pairing mode
+                      Make sure your earbuds are connected in iPhone Settings ➔ Bluetooth, or open the case lid and tap Rescan.
                     </Text>
                   </>
                 )}
@@ -85,7 +100,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             }
           />
 
-          {/* Bottom Actions */}
+          {/* Footer Actions */}
           <View style={styles.footer}>
             <TouchableOpacity
               style={[styles.scanBtn, isScanning && styles.scanBtnDisabled]}
@@ -107,7 +122,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -115,8 +130,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingTop: 20,
-    paddingHorizontal: 20,
-    maxHeight: '80%',
+    paddingHorizontal: 18,
+    maxHeight: '85%',
     minHeight: '50%',
     borderWidth: 1,
     borderColor: '#30363d',
@@ -125,7 +140,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingBottom: 16,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#21262d',
   },
@@ -136,7 +151,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: '#8b949e',
-    fontSize: 13,
+    fontSize: 12,
     marginTop: 2,
   },
   closeBtn: {
@@ -152,12 +167,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
+  tipBox: {
+    backgroundColor: '#0d1117',
+    padding: 10,
+    borderRadius: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#21262d',
+  },
+  tipText: {
+    color: '#8b949e',
+    fontSize: 11,
+    lineHeight: 15,
+  },
   listContent: {
     paddingVertical: 12,
   },
   deviceRow: {
     backgroundColor: '#0d1117',
-    padding: 16,
+    padding: 14,
     borderRadius: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -166,30 +194,56 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#30363d',
   },
+  deviceRowPaired: {
+    borderColor: '#10b981',
+    backgroundColor: '#081c15',
+  },
+  deviceInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   deviceName: {
     color: '#f0f6fc',
     fontSize: 15,
     fontWeight: '600',
   },
+  systemBadge: {
+    backgroundColor: '#065f46',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  systemBadgeText: {
+    color: '#a7f3d0',
+    fontSize: 10,
+    fontWeight: '700',
+  },
   deviceId: {
     color: '#8b949e',
     fontSize: 11,
     fontFamily: 'monospace',
-    marginTop: 2,
+    marginTop: 3,
   },
-  rssiBadge: {
-    backgroundColor: '#1f2937',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+  actionColumn: {
+    alignItems: 'flex-end',
+  },
+  connectLabel: {
+    color: '#38bdf8',
+    fontSize: 12,
+    fontWeight: '700',
   },
   rssiText: {
-    color: '#a5b4fc',
-    fontSize: 11,
-    fontWeight: '500',
+    color: '#6e7681',
+    fontSize: 10,
+    marginTop: 2,
   },
   emptyContainer: {
-    paddingVertical: 40,
+    paddingVertical: 36,
     alignItems: 'center',
   },
   emptyText: {
@@ -203,10 +257,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     marginTop: 6,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   footer: {
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderTopWidth: 1,
     borderTopColor: '#21262d',
   },
@@ -225,4 +279,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
