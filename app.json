@@ -19,6 +19,9 @@
         "UIBackgroundModes": ["bluetooth-central"]
       }
     },
+    "android": {
+      "package": "com.unofficial.galaxybuds"
+    },
     "plugins": [
       [
         "@config-plugins/react-native-ble-plx",
