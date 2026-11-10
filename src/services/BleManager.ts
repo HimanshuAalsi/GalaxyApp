@@ -2,6 +2,7 @@ import { BleManager as PlxBleManager, Device, Subscription } from 'react-native-
 import { Buffer } from 'buffer';
 import { BLE_CONFIG } from '../constants/bluetooth';
 import { useBudsStore, BudsDevice } from '../store/useBudsStore';
+import { CommandDispatcher } from './CommandDispatcher';
 
 export class BleService {
   private static instance: BleService;
@@ -10,21 +11,18 @@ export class BleService {
   private pendingDeviceId: string | null = null;
   private rxSubscription: Subscription | null = null;
 
-  private txServiceUuid: string = BLE_CONFIG.SAMSUNG_SERVICE_UUID;
-  private txCharacteristicUuid: string = BLE_CONFIG.CHARACTERISTIC_TX_UUID;
-  private rxServiceUuid: string = BLE_CONFIG.SAMSUNG_SERVICE_UUID;
-  private rxCharacteristicUuid: string = BLE_CONFIG.CHARACTERISTIC_RX_UUID;
+  private txServiceUuid: string | null = null;
+  private txCharacteristicUuid: string | null = null;
+  private rxServiceUuid: string | null = null;
+  private rxCharacteristicUuid: string | null = null;
+  private hasNotifiableEndpoint = false;
 
   private onRawDataReceived?: (data: Uint8Array) => void;
   private scanTimeoutTimer: NodeJS.Timeout | null = null;
   private batchSyncTimer: NodeJS.Timeout | null = null;
 
-  // Internal device cache to prevent frantic React re-renders
+  // Internal device cache to eliminate frantic React re-renders and touch dropping
   private deviceCache = new Map<string, BudsDevice>();
-  private isConnectingOrConnected = false;
-
-  // Known / Preferred Galaxy Buds2 Pro identifier
-  private preferredDeviceId = '85D47665-B1CC-B62C-8F89-689ABAFE1965';
 
   private constructor() {
     this.manager = new PlxBleManager();
@@ -70,45 +68,31 @@ export class BleService {
 
   /**
    * Auto-connect workflow:
-   * First attempts direct connection to known Buds2 Pro device.
-   * If not immediately connectable, starts rapid scan and auto-connects as soon as detected!
+   * Starts scan and automatically connects to the Buds2 Pro as soon as it is detected!
    */
   public async autoConnectOrScan(): Promise<void> {
     const isReady = await this.ensurePoweredOn();
     if (!isReady) return;
 
-    if (this.isConnectingOrConnected) return;
+    const currentStatus = useBudsStore.getState().connectionState;
+    if (currentStatus === 'connected' || currentStatus === 'connecting') return;
 
-    useBudsStore.getState().logMessage('Checking for Galaxy Buds2 Pro...');
-
-    // Attempt direct link to known device ID first (quick 2.5s attempt)
-    if (this.preferredDeviceId) {
-      try {
-        const directSuccess = await this.connectWithTimeout(this.preferredDeviceId, 2500);
-        if (directSuccess) {
-          useBudsStore.getState().logMessage('Direct link to Buds2 Pro succeeded!');
-          return;
-        }
-      } catch {
-        // Fallback to active scanning
-      }
-    }
-
-    // Start scan to auto-discover and auto-connect
+    useBudsStore.getState().logMessage('Scanning for your Galaxy Buds2 Pro...');
     await this.startScan(true);
   }
 
   /**
-   * Scans for nearby devices with throttled React state syncing to prevent touch-dropping
+   * Scans for nearby devices with throttled React state syncing
    */
-  public async startScan(autoConnectOnDetect: boolean = true): Promise<void> {
+  public async startScan(autoConnectOnDetect: boolean = false): Promise<void> {
     const isReady = await this.ensurePoweredOn();
     if (!isReady) {
       useBudsStore.getState().logMessage('Bluetooth is not powered on or permission denied.');
       return;
     }
 
-    if (this.isConnectingOrConnected) {
+    const currentStatus = useBudsStore.getState().connectionState;
+    if (currentStatus === 'connected' || currentStatus === 'connecting') {
       return;
     }
 
@@ -125,16 +109,17 @@ export class BleService {
         const peripherals = await this.manager.connectedDevices([serviceUuid]);
         for (const dev of peripherals) {
           const devName = dev.name || 'Galaxy Buds2 Pro (iOS Paired)';
-          this.deviceCache.set(dev.id, {
+          const item: BudsDevice = {
             id: dev.id,
             name: devName,
             rssi: -45,
             isSystemConnected: true,
             isSamsung: true,
-          });
+          };
+          this.deviceCache.set(dev.id, item);
 
-          // Auto-connect if it is our target Buds
-          if (autoConnectOnDetect && !this.isConnectingOrConnected) {
+          if (autoConnectOnDetect) {
+            useBudsStore.getState().logMessage(`Auto-connecting to paired accessory: ${devName}...`);
             this.stopScan();
             this.connect(dev.id);
             return;
@@ -174,12 +159,12 @@ export class BleService {
       }
 
       // Check advertised name
-      const isBudsByName = name && /Buds2\s*Pro|SM-R510|Galaxy\s*Buds/i.test(name);
+      const isTargetBuds = Boolean(name && /Buds2\s*Pro|SM-R510|Galaxy\s*Buds/i.test(name));
       if (name && BLE_CONFIG.DEVICE_NAME_REGEX.test(name)) {
         isSamsung = true;
       }
 
-      const displayName = isBudsByName
+      const displayName = isTargetBuds
         ? name
         : isSamsung
         ? name || 'Samsung Audio Device'
@@ -196,18 +181,18 @@ export class BleService {
 
       this.scheduleDeviceSync();
 
-      // AUTO-CONNECT: As soon as Buds2 Pro is identified, immediately stop scan and connect!
-      if (autoConnectOnDetect && (isBudsByName || (isSamsung && name && /Buds/i.test(name)))) {
-        if (!this.isConnectingOrConnected) {
-          useBudsStore.getState().logMessage(`Galaxy Buds2 Pro detected (${displayName})! Auto-connecting...`);
-          this.preferredDeviceId = device.id;
+      // AUTO-CONNECT: The moment Buds2 Pro is identified, immediately connect!
+      if (autoConnectOnDetect && isTargetBuds) {
+        const connState = useBudsStore.getState().connectionState;
+        if (connState !== 'connecting' && connState !== 'connected') {
+          useBudsStore.getState().logMessage(`Found ${displayName}! Auto-connecting...`);
           this.stopScan();
           this.connect(device.id);
         }
       }
     });
 
-    // Auto-stop scan strictly after 6 seconds (no indefinite scanning!)
+    // Auto-stop scan strictly after 6 seconds
     this.scanTimeoutTimer = setTimeout(() => {
       this.stopScan();
     }, 6000);
@@ -224,8 +209,8 @@ export class BleService {
   private flushDeviceCacheToStore(): void {
     const list = Array.from(this.deviceCache.values());
     list.sort((a, b) => {
-      const aIsTarget = a.name && /Buds2\s*Pro/i.test(a.name) ? 2 : a.isSamsung ? 1 : 0;
-      const bIsTarget = b.name && /Buds2\s*Pro/i.test(b.name) ? 2 : b.isSamsung ? 1 : 0;
+      const aIsTarget = Boolean(a.name && /Buds2\s*Pro/i.test(a.name)) ? 2 : a.isSamsung ? 1 : 0;
+      const bIsTarget = Boolean(b.name && /Buds2\s*Pro/i.test(b.name)) ? 2 : b.isSamsung ? 1 : 0;
       if (aIsTarget !== bIsTarget) return bIsTarget - aIsTarget;
       return (b.rssi ?? -999) - (a.rssi ?? -999);
     });
@@ -249,59 +234,63 @@ export class BleService {
   }
 
   /**
-   * Internal connection helper with strict timeout
-   */
-  private async connectWithTimeout(deviceId: string, timeoutMs: number): Promise<boolean> {
-    this.pendingDeviceId = deviceId;
-    this.isConnectingOrConnected = true;
-
-    const connectPromise = this.manager.connectToDevice(deviceId, { autoConnect: false });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection timed out')), timeoutMs)
-    );
-
-    const connectedDevice = await Promise.race([connectPromise, timeoutPromise]);
-    this.activeDevice = connectedDevice;
-    this.pendingDeviceId = null;
-    this.preferredDeviceId = deviceId;
-
-    connectedDevice.onDisconnected((error) => {
-      this.isConnectingOrConnected = false;
-      useBudsStore.getState().setConnectionState('disconnected');
-      useBudsStore.getState().setConnectedDevice(null);
-      useBudsStore.getState().logMessage(`Disconnected: ${error?.message || 'Connection lost'}`);
-      this.cleanup();
-    });
-
-    useBudsStore.getState().logMessage('Discovering GATT services...');
-    await connectedDevice.discoverAllServicesAndCharacteristics();
-
-    await this.resolveGattEndpoints(connectedDevice);
-    await this.startNotificationListener();
-
-    useBudsStore.getState().setConnectionState('connected');
-    useBudsStore.getState().setConnectedDevice({
-      id: connectedDevice.id,
-      name: connectedDevice.name || 'Galaxy Buds2 Pro',
-      rssi: null,
-      isSamsung: true,
-    });
-    useBudsStore.getState().logMessage('Connected! Real-time telemetry linked.');
-
-    return true;
-  }
-
-  /**
-   * Public connect method called when tapping a device or auto-connecting
+   * Connects to designated peripheral with robust timeouts and GATT resolution
    */
   public async connect(deviceId: string): Promise<boolean> {
     try {
       this.stopScan();
+      this.pendingDeviceId = deviceId;
       useBudsStore.getState().setConnectionState('connecting');
       useBudsStore.getState().logMessage(`Connecting to ${deviceId}...`);
 
-      const success = await this.connectWithTimeout(deviceId, BLE_CONFIG.CONNECTION_TIMEOUT_MS);
-      return success;
+      const connectPromise = this.manager.connectToDevice(deviceId, { autoConnect: false });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                'Connection timed out (10s). Make sure case lid is open or hold touchpads for 3s until LED blinks.'
+              )
+            ),
+          10000
+        )
+      );
+
+      const connectedDevice = await Promise.race([connectPromise, timeoutPromise]);
+      this.activeDevice = connectedDevice;
+      this.pendingDeviceId = null;
+
+      connectedDevice.onDisconnected((error) => {
+        useBudsStore.getState().setConnectionState('disconnected');
+        useBudsStore.getState().setConnectedDevice(null);
+        useBudsStore.getState().logMessage(`Disconnected: ${error?.message || 'Connection lost'}`);
+        this.cleanup();
+      });
+
+      useBudsStore.getState().logMessage('Discovering GATT services...');
+      await connectedDevice.discoverAllServicesAndCharacteristics();
+
+      // Resolve TX/RX endpoints without aborting on missing notifiable characteristics
+      await this.resolveGattEndpoints(connectedDevice);
+
+      // Start notifications if available
+      await this.startNotificationListener();
+
+      useBudsStore.getState().setConnectionState('connected');
+      useBudsStore.getState().setConnectedDevice({
+        id: connectedDevice.id,
+        name: connectedDevice.name || 'Galaxy Buds2 Pro',
+        rssi: null,
+        isSamsung: true,
+      });
+      useBudsStore.getState().logMessage('Connected! Real-time telemetry linked.');
+
+      // Request initial telemetry status after 400ms
+      setTimeout(() => {
+        CommandDispatcher.getInstance().requestStatus().catch(() => {});
+      }, 400);
+
+      return true;
     } catch (error: any) {
       if (this.pendingDeviceId) {
         try {
@@ -311,7 +300,6 @@ export class BleService {
         }
         this.pendingDeviceId = null;
       }
-      this.isConnectingOrConnected = false;
       useBudsStore.getState().setConnectionState('disconnected');
       useBudsStore.getState().logMessage(`Connection failed: ${error.message}`);
       this.cleanup();
@@ -320,64 +308,48 @@ export class BleService {
   }
 
   /**
-   * Dynamic GATT characteristic resolver
+   * Dynamic GATT characteristic resolver: inspects every discovered service
    */
   private async resolveGattEndpoints(device: Device): Promise<void> {
+    this.txServiceUuid = null;
+    this.txCharacteristicUuid = null;
+    this.rxServiceUuid = null;
+    this.rxCharacteristicUuid = null;
+    this.hasNotifiableEndpoint = false;
+
     const services = await device.services();
-    useBudsStore.getState().logMessage(`Found ${services.length} GATT services.`);
+    useBudsStore.getState().logMessage(`Discovered ${services.length} GATT services:`);
 
     let writableEndpoint: { serviceUuid: string; charUuid: string } | null = null;
     let notifiableEndpoint: { serviceUuid: string; charUuid: string } | null = null;
 
-    // Check Samsung vendor services first
+    // Scan all services and log their characteristics
     for (const service of services) {
       const sUuid = service.uuid.toLowerCase();
-      const isVendorService =
-        sUuid.includes('fd5a') ||
-        sUuid.includes('2e73') ||
-        sUuid.includes('fe2c') ||
-        sUuid.includes('a23d') ||
-        sUuid.includes('b4a9') ||
-        sUuid.includes('e74b') ||
-        sUuid.includes('e7ab') ||
-        sUuid.includes('d908');
-
-      if (!isVendorService) continue;
-
       try {
         const characteristics = await service.characteristics();
+        const shortSvc = sUuid.length > 8 ? sUuid.slice(0, 8) : sUuid;
+        useBudsStore.getState().logMessage(`Svc [${shortSvc}]: ${characteristics.length} chars`);
+
         for (const char of characteristics) {
-          if ((char.isWritableWithResponse || char.isWritableWithoutResponse) && !writableEndpoint) {
+          const cUuid = char.uuid.toLowerCase();
+          const shortChar = cUuid.length > 8 ? cUuid.slice(0, 8) : cUuid;
+          const isWritable = char.isWritableWithResponse || char.isWritableWithoutResponse;
+          const isNotifiable = char.isNotifiable || char.isIndicatable;
+
+          if (isWritable && !writableEndpoint) {
             writableEndpoint = { serviceUuid: service.uuid, charUuid: char.uuid };
           }
-          if ((char.isNotifiable || char.isIndicatable) && !notifiableEndpoint) {
+          if (isNotifiable && !notifiableEndpoint) {
             notifiableEndpoint = { serviceUuid: service.uuid, charUuid: char.uuid };
           }
+
+          useBudsStore.getState().logMessage(
+            `  Char [${shortChar}]: W=${isWritable ? '1' : '0'}, N=${isNotifiable ? '1' : '0'}`
+          );
         }
       } catch {
-        // Skip
-      }
-    }
-
-    // Fallback: any non-standard service
-    if (!writableEndpoint || !notifiableEndpoint) {
-      for (const service of services) {
-        const sUuid = service.uuid.toLowerCase();
-        if (sUuid.startsWith('00001800') || sUuid.startsWith('00001801')) continue;
-
-        try {
-          const characteristics = await service.characteristics();
-          for (const char of characteristics) {
-            if ((char.isWritableWithResponse || char.isWritableWithoutResponse) && !writableEndpoint) {
-              writableEndpoint = { serviceUuid: service.uuid, charUuid: char.uuid };
-            }
-            if ((char.isNotifiable || char.isIndicatable) && !notifiableEndpoint) {
-              notifiableEndpoint = { serviceUuid: service.uuid, charUuid: char.uuid };
-            }
-          }
-        } catch {
-          // Skip
-        }
+        // Ignore unreadable service tables
       }
     }
 
@@ -388,39 +360,51 @@ export class BleService {
     if (notifiableEndpoint) {
       this.rxServiceUuid = notifiableEndpoint.serviceUuid;
       this.rxCharacteristicUuid = notifiableEndpoint.charUuid;
+      this.hasNotifiableEndpoint = true;
     }
 
     useBudsStore.getState().logMessage(
-      `GATT: TX [${this.txCharacteristicUuid.slice(0, 8)}] | RX [${this.rxCharacteristicUuid.slice(0, 8)}]`
+      `Linked TX: [${this.txCharacteristicUuid?.slice(0, 8) || 'none'}] | RX: [${this.rxCharacteristicUuid?.slice(0, 8) || 'none'}]`
     );
   }
 
   private async startNotificationListener(): Promise<void> {
-    if (!this.activeDevice) return;
+    if (!this.activeDevice || !this.hasNotifiableEndpoint || !this.rxServiceUuid || !this.rxCharacteristicUuid) {
+      useBudsStore.getState().logMessage('No notifiable GATT characteristic available, using direct polling.');
+      return;
+    }
 
-    this.rxSubscription?.remove();
+    try {
+      this.rxSubscription?.remove();
+      this.rxSubscription = this.activeDevice.monitorCharacteristicForService(
+        this.rxServiceUuid,
+        this.rxCharacteristicUuid,
+        (error, characteristic) => {
+          if (error) {
+            useBudsStore.getState().logMessage(`RX error: ${error.message}`);
+            return;
+          }
 
-    this.rxSubscription = this.activeDevice.monitorCharacteristicForService(
-      this.rxServiceUuid,
-      this.rxCharacteristicUuid,
-      (error, characteristic) => {
-        if (error) {
-          useBudsStore.getState().logMessage(`RX error: ${error.message}`);
-          return;
+          if (characteristic?.value) {
+            const rawBuffer = Buffer.from(characteristic.value, 'base64');
+            const uint8Array = new Uint8Array(rawBuffer.buffer, rawBuffer.byteOffset, rawBuffer.length);
+            this.onRawDataReceived?.(uint8Array);
+          }
         }
-
-        if (characteristic?.value) {
-          const rawBuffer = Buffer.from(characteristic.value, 'base64');
-          const uint8Array = new Uint8Array(rawBuffer.buffer, rawBuffer.byteOffset, rawBuffer.length);
-          this.onRawDataReceived?.(uint8Array);
-        }
-      }
-    );
+      );
+    } catch (err: any) {
+      useBudsStore.getState().logMessage(`Notification warning: ${err.message}`);
+    }
   }
 
   public async write(bytes: Uint8Array): Promise<boolean> {
     if (!this.activeDevice) {
       useBudsStore.getState().logMessage('Cannot write: Device not connected.');
+      return false;
+    }
+
+    if (!this.txServiceUuid || !this.txCharacteristicUuid) {
+      useBudsStore.getState().logMessage('Cannot write: No writable GATT characteristic resolved.');
       return false;
     }
 
@@ -466,7 +450,6 @@ export class BleService {
       }
     }
     this.cleanup();
-    this.isConnectingOrConnected = false;
     useBudsStore.getState().setConnectionState('disconnected');
     useBudsStore.getState().setConnectedDevice(null);
     useBudsStore.getState().logMessage('Disconnected.');
@@ -477,6 +460,6 @@ export class BleService {
     this.rxSubscription = null;
     this.activeDevice = null;
     this.pendingDeviceId = null;
-    this.isConnectingOrConnected = false;
+    this.hasNotifiableEndpoint = false;
   }
 }

@@ -81,16 +81,10 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           <Text style={styles.deviceId}>{item.id}</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.linkButtonTouch}
-          onPress={() => onSelectDevice(item)}
-          activeOpacity={0.6}
-          disabled={isConnecting}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
+        <View style={styles.linkButtonTouch}>
           <Text style={styles.connectLabel}>Tap to Link →</Text>
           {item.rssi && <Text style={styles.rssiText}>{item.rssi} dBm</Text>}
-        </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
