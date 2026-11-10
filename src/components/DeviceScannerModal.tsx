@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   ActivityIndicator,
   SectionList,
 } from 'react-native';
@@ -16,6 +15,7 @@ interface DeviceScannerModalProps {
   onClose: () => void;
   onSelectDevice: (device: BudsDevice) => void;
   onRefreshScan: () => void;
+  onStopScan: () => void;
   onCancelConnection?: () => void;
 }
 
@@ -24,53 +24,76 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   onClose,
   onSelectDevice,
   onRefreshScan,
+  onStopScan,
   onCancelConnection,
 }) => {
   const { discoveredDevices, connectionState } = useBudsStore();
   const isScanning = connectionState === 'scanning';
   const isConnecting = connectionState === 'connecting';
 
-  // Partition devices into Samsung/Recognized vs Other Nearby BLE
-  const samsungDevices = discoveredDevices.filter((d) => d.isSamsung || d.isSystemConnected);
-  const otherDevices = discoveredDevices.filter((d) => !d.isSamsung && !d.isSystemConnected);
+  // Partition devices into Target Galaxy Buds vs Other Nearby BLE
+  const samsungDevices = discoveredDevices.filter(
+    (d) =>
+      (d.name && /Buds/i.test(d.name)) ||
+      d.isSamsung ||
+      d.isSystemConnected
+  );
+  const otherDevices = discoveredDevices.filter(
+    (d) =>
+      !((d.name && /Buds/i.test(d.name)) || d.isSamsung || d.isSystemConnected)
+  );
 
   const sections = [
     { title: 'Recognized Galaxy Buds', data: samsungDevices },
     { title: 'Other Nearby Bluetooth Devices', data: otherDevices },
   ].filter((s) => s.data.length > 0);
 
-  const renderItem = ({ item }: { item: BudsDevice }) => (
-    <TouchableOpacity
-      style={[
-        styles.deviceRow,
-        (item.isSamsung || item.isSystemConnected) && styles.deviceRowSamsung,
-      ]}
-      onPress={() => onSelectDevice(item)}
-      activeOpacity={0.7}
-      disabled={isConnecting}
-    >
-      <View style={styles.deviceInfo}>
-        <View style={styles.nameRow}>
-          <Text style={styles.deviceName}>{item.name}</Text>
-          {item.isSystemConnected && (
-            <View style={styles.systemBadge}>
-              <Text style={styles.systemBadgeText}>iOS Paired</Text>
-            </View>
-          )}
-          {item.isSamsung && !item.isSystemConnected && (
-            <View style={styles.samsungBadge}>
-              <Text style={styles.samsungBadgeText}>Samsung 0x0075</Text>
-            </View>
-          )}
+  const renderItem = ({ item }: { item: BudsDevice }) => {
+    const isTargetBuds = Boolean(item.name && /Buds2\s*Pro/i.test(item.name));
+    return (
+      <TouchableOpacity
+        style={[
+          styles.deviceRow,
+          (item.isSamsung || item.isSystemConnected) ? styles.deviceRowSamsung : undefined,
+          isTargetBuds ? styles.deviceRowTarget : undefined,
+        ]}
+        onPress={() => onSelectDevice(item)}
+        activeOpacity={0.65}
+        disabled={isConnecting}
+      >
+        <View style={styles.deviceInfo}>
+          <View style={styles.nameRow}>
+            {isTargetBuds && <Text style={styles.starIcon}>⭐ </Text>}
+            <Text style={[styles.deviceName, isTargetBuds ? styles.targetDeviceName : undefined]}>
+              {item.name}
+            </Text>
+            {item.isSystemConnected && (
+              <View style={styles.systemBadge}>
+                <Text style={styles.systemBadgeText}>iOS Paired</Text>
+              </View>
+            )}
+            {item.isSamsung && !item.isSystemConnected && (
+              <View style={styles.samsungBadge}>
+                <Text style={styles.samsungBadgeText}>Samsung 0x0075</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.deviceId}>{item.id}</Text>
         </View>
-        <Text style={styles.deviceId}>{item.id}</Text>
-      </View>
-      <View style={styles.actionColumn}>
-        <Text style={styles.connectLabel}>Tap to Link →</Text>
-        {item.rssi && <Text style={styles.rssiText}>{item.rssi} dBm</Text>}
-      </View>
-    </TouchableOpacity>
-  );
+
+        <TouchableOpacity
+          style={styles.linkButtonTouch}
+          onPress={() => onSelectDevice(item)}
+          activeOpacity={0.6}
+          disabled={isConnecting}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Text style={styles.connectLabel}>Tap to Link →</Text>
+          {item.rssi && <Text style={styles.rssiText}>{item.rssi} dBm</Text>}
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -97,7 +120,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
               2. Open the <Text style={styles.bold}>case lid</Text> (or hold both touchpads for 3s until LED flashes).
             </Text>
             <Text style={styles.instructionStep}>
-              3. Tap <Text style={styles.bold}>Rescan</Text> below and select your Buds.
+              3. Select your Buds below (they will connect automatically once detected).
             </Text>
           </View>
 
@@ -105,7 +128,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           {isConnecting && (
             <View style={styles.connectingBanner}>
               <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 10 }} />
-              <Text style={styles.connectingText}>Establishing BLE Data Link (up to 8s)...</Text>
+              <Text style={styles.connectingText}>Establishing BLE Data Link...</Text>
               {onCancelConnection && (
                 <TouchableOpacity onPress={onCancelConnection} style={styles.cancelBtn}>
                   <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -147,18 +170,27 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             }
           />
 
-          {/* Footer Actions */}
+          {/* Footer Actions: Rescan or Stop Scan */}
           <View style={styles.footer}>
-            <TouchableOpacity
-              style={[styles.scanBtn, isScanning && styles.scanBtnDisabled]}
-              onPress={onRefreshScan}
-              disabled={isScanning || isConnecting}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.scanBtnText}>
-                {isScanning ? 'Scanning...' : 'Rescan Devices'}
-              </Text>
-            </TouchableOpacity>
+            {isScanning ? (
+              <TouchableOpacity
+                style={[styles.scanBtn, styles.stopScanBtn]}
+                onPress={onStopScan}
+                activeOpacity={0.8}
+              >
+                <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                <Text style={styles.scanBtnText}>Stop Scan</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.scanBtn}
+                onPress={onRefreshScan}
+                disabled={isConnecting}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.scanBtnText}>Rescan Devices</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
@@ -288,20 +320,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#172554',
     borderColor: '#1d4ed8',
   },
+  deviceRowTarget: {
+    backgroundColor: '#1e3a8a',
+    borderColor: '#3b82f6',
+    borderWidth: 1.5,
+  },
   deviceInfo: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 10,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
   },
+  starIcon: {
+    fontSize: 14,
+  },
   deviceName: {
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '600',
     marginRight: 6,
+  },
+  targetDeviceName: {
+    color: '#93c5fd',
+    fontWeight: 'bold',
   },
   systemBadge: {
     backgroundColor: '#10b981',
@@ -332,13 +376,15 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontFamily: 'Courier',
   },
-  actionColumn: {
+  linkButtonTouch: {
     alignItems: 'flex-end',
+    paddingVertical: 4,
+    paddingHorizontal: 6,
   },
   connectLabel: {
     color: '#60a5fa',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
   rssiText: {
     color: '#9ca3af',
@@ -373,10 +419,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
   },
-  scanBtnDisabled: {
-    backgroundColor: '#1d4ed8',
-    opacity: 0.6,
+  stopScanBtn: {
+    backgroundColor: '#b91c1c',
   },
   scanBtnText: {
     color: '#ffffff',

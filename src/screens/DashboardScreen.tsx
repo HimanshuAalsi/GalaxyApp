@@ -32,16 +32,25 @@ export const DashboardScreen: React.FC = () => {
   const dispatcher = CommandDispatcher.getInstance();
 
   useEffect(() => {
-    // Initial check: query paired system accessories and start an initial search
+    // Automatically connect to Buds2 Pro on launch or start auto-scan
     (async () => {
-      await bleService.ensurePoweredOn();
-      await bleService.startScan();
+      await bleService.autoConnectOrScan();
     })();
   }, []);
 
+  // When connection succeeds, dismiss scanner modal and request full telemetry
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      setIsScannerVisible(false);
+      setTimeout(async () => {
+        await dispatcher.requestStatus();
+      }, 400);
+    }
+  }, [connectionState]);
+
   const handleOpenScanner = async () => {
     setIsScannerVisible(true);
-    await bleService.startScan();
+    await bleService.startScan(true);
   };
 
   const handleSelectDevice = async (device: BudsDevice) => {
@@ -50,7 +59,7 @@ export const DashboardScreen: React.FC = () => {
       setIsScannerVisible(false);
       setTimeout(async () => {
         await dispatcher.requestStatus();
-      }, 500);
+      }, 400);
     }
   };
 
@@ -64,7 +73,7 @@ export const DashboardScreen: React.FC = () => {
       await dispatcher.requestStatus();
       setTimeout(() => setRefreshing(false), 500);
     } else {
-      await bleService.startScan();
+      await bleService.autoConnectOrScan();
     }
   };
 
@@ -95,9 +104,9 @@ export const DashboardScreen: React.FC = () => {
               <Text style={styles.noticeIcon}>⚡</Text>
             </View>
             <View style={styles.noticeTextContainer}>
-              <Text style={styles.noticeTitle}>Link Buds2 Pro Settings</Text>
+              <Text style={styles.noticeTitle}>Connect Galaxy Buds2 Pro</Text>
               <Text style={styles.noticeSubtext}>
-                Open charging case lid with earbuds inside, then tap here to link live battery & controls.
+                Open case lid with earbuds inside, then tap here to link live battery & controls.
               </Text>
             </View>
             <Text style={styles.noticeArrow}>→</Text>
@@ -142,7 +151,8 @@ export const DashboardScreen: React.FC = () => {
           bleService.stopScan();
         }}
         onSelectDevice={handleSelectDevice}
-        onRefreshScan={() => bleService.startScan()}
+        onRefreshScan={() => bleService.startScan(true)}
+        onStopScan={() => bleService.stopScan()}
         onCancelConnection={handleDisconnect}
       />
     </SafeAreaView>

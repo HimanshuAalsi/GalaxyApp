@@ -90,6 +90,7 @@ export interface BudsStore {
   setConnectionState: (state: ConnectionState) => void;
   setConnectedDevice: (device: BudsDevice | null) => void;
   addDiscoveredDevice: (device: BudsDevice) => void;
+  setDiscoveredDevices: (devices: BudsDevice[]) => void;
   clearDiscoveredDevices: () => void;
 
   updateBattery: (battery: Partial<BatteryState>) => void;
@@ -190,6 +191,7 @@ export const useBudsStore = create<BudsStore>((set) => ({
       }
       return { discoveredDevices: [...s.discoveredDevices, device] };
     }),
+  setDiscoveredDevices: (devices) => set({ discoveredDevices: devices }),
   clearDiscoveredDevices: () => set({ discoveredDevices: [] }),
 
   updateBattery: (battery) =>
