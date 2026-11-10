@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Galaxy Buds Companion",
+    "slug": "galaxy-buds-companion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0d1117"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.unofficial.galaxybuds",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "This app requires Bluetooth access to communicate with and control your Samsung Galaxy Buds2 Pro.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth Low Energy to manage your Galaxy Buds2 Pro earbuds.",
+        "UIBackgroundModes": ["bluetooth-central"]
+      }
+    },
+    "plugins": [
+      [
+        "@config-plugins/react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": ["central"],
+          "bluetoothAlwaysPermission": "Allow Galaxy Buds Companion to connect and manage your Galaxy Buds2 Pro in the background."
+        }
+      ]
+    ]
+  }
+}
+
