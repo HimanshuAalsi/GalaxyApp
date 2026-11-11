@@ -4,11 +4,13 @@ import { useBudsStore } from '../store/useBudsStore';
 import { CommandDispatcher } from '../services/CommandDispatcher';
 import { FitTestModal } from './FitTestModal';
 import { FindMyBudsModal } from './FindMyBudsModal';
+import { GattDiagnosticsModal } from './GattDiagnosticsModal';
 
 export const ExtraSettingsSection: React.FC = () => {
   const { inEarPause, seamlessConnection, lastLog, connectionState } = useBudsStore();
   const [isFitTestOpen, setIsFitTestOpen] = useState(false);
   const [isFindMyBudsOpen, setIsFindMyBudsOpen] = useState(false);
+  const [isDiagOpen, setIsDiagOpen] = useState(false);
   const isConnected = connectionState === 'connected';
   const dispatcher = CommandDispatcher.getInstance();
 
@@ -118,17 +120,25 @@ export const ExtraSettingsSection: React.FC = () => {
         </View>
 
         {/* Live Hex Stream Inspector */}
-        <View style={styles.logBox}>
-          <Text style={styles.logHeader}>LIVE GATT SPP STREAM</Text>
+        <TouchableOpacity
+          style={styles.logBox}
+          onPress={() => setIsDiagOpen(true)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.logHeaderRow}>
+            <Text style={styles.logHeader}>LIVE GATT SPP STREAM</Text>
+            <Text style={styles.logInspectPrompt}>Open Diagnostics & Logs →</Text>
+          </View>
           <Text style={styles.logText} numberOfLines={2}>
             {lastLog}
           </Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Modals */}
       <FitTestModal visible={isFitTestOpen} onClose={() => setIsFitTestOpen(false)} />
       <FindMyBudsModal visible={isFindMyBudsOpen} onClose={() => setIsFindMyBudsOpen(false)} />
+      <GattDiagnosticsModal visible={isDiagOpen} onClose={() => setIsDiagOpen(false)} />
     </View>
   );
 };
@@ -247,12 +257,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#21262d',
   },
+  logHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   logHeader: {
     color: '#6e7681',
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.5,
-    marginBottom: 4,
+  },
+  logInspectPrompt: {
+    color: '#3b82f6',
+    fontSize: 9,
+    fontWeight: '600',
   },
   logText: {
     color: '#58a6ff',

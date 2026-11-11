@@ -24,6 +24,21 @@ export interface BudsDevice {
   rawManufacturerData?: string | null;
 }
 
+export interface DiscoveredGattCharacteristic {
+  serviceUuid: string;
+  charUuid: string;
+  isWritable: boolean;
+  isNotifiable: boolean;
+  isReadable: boolean;
+  isIndicatable: boolean;
+}
+
+export interface DiscoveredGattService {
+  uuid: string;
+  isVendor: boolean;
+  characteristics: DiscoveredGattCharacteristic[];
+}
+
 export interface TouchControlsState {
   isAllLocked: boolean;
   tap: boolean;
@@ -85,6 +100,10 @@ export interface BudsStore {
   // Firmware & Diagnostics
   firmwareVersion: string;
   lastLog: string;
+  logHistory: string[];
+  discoveredServices: DiscoveredGattService[];
+  activeTxEndpoint: { serviceUuid: string; charUuid: string } | null;
+  activeRxEndpoint: { serviceUuid: string; charUuid: string } | null;
 
   // Actions
   setConnectionState: (state: ConnectionState) => void;
@@ -119,6 +138,10 @@ export interface BudsStore {
 
   setFirmwareVersion: (version: string) => void;
   logMessage: (msg: string) => void;
+  clearLogHistory: () => void;
+  setDiscoveredServices: (services: DiscoveredGattService[]) => void;
+  setActiveTxEndpoint: (endpoint: { serviceUuid: string; charUuid: string } | null) => void;
+  setActiveRxEndpoint: (endpoint: { serviceUuid: string; charUuid: string } | null) => void;
 }
 
 export const useBudsStore = create<BudsStore>((set) => ({
@@ -178,6 +201,10 @@ export const useBudsStore = create<BudsStore>((set) => ({
 
   firmwareVersion: 'R510XXU0AWF4',
   lastLog: 'Initialized.',
+  logHistory: ['[Ready] Companion engine initialized.'],
+  discoveredServices: [],
+  activeTxEndpoint: null,
+  activeRxEndpoint: null,
 
   setConnectionState: (state) => set({ connectionState: state }),
   setConnectedDevice: (device) => set({ connectedDevice: device }),
@@ -233,6 +260,14 @@ export const useBudsStore = create<BudsStore>((set) => ({
   setFirmwareVersion: (version) => set({ firmwareVersion: version }),
   logMessage: (msg) => {
     const timestamp = new Date().toLocaleTimeString();
-    set({ lastLog: `[${timestamp}] ${msg}` });
+    const entry = `[${timestamp}] ${msg}`;
+    set((s) => ({
+      lastLog: entry,
+      logHistory: [entry, ...s.logHistory.slice(0, 199)],
+    }));
   },
+  clearLogHistory: () => set({ logHistory: [] }),
+  setDiscoveredServices: (services) => set({ discoveredServices: services }),
+  setActiveTxEndpoint: (endpoint) => set({ activeTxEndpoint: endpoint }),
+  setActiveRxEndpoint: (endpoint) => set({ activeRxEndpoint: endpoint }),
 }));

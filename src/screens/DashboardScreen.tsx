@@ -20,12 +20,14 @@ import { TouchControlSection } from '../components/TouchControlSection';
 import { NeckStretchControl } from '../components/NeckStretchControl';
 import { ExtraSettingsSection } from '../components/ExtraSettingsSection';
 import { DeviceScannerModal } from '../components/DeviceScannerModal';
+import { GattDiagnosticsModal } from '../components/GattDiagnosticsModal';
 import { BleService } from '../services/BleManager';
 import { CommandDispatcher } from '../services/CommandDispatcher';
 import { useBudsStore, BudsDevice } from '../store/useBudsStore';
 
 export const DashboardScreen: React.FC = () => {
   const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [isDiagnosticsVisible, setIsDiagnosticsVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { connectionState } = useBudsStore();
   const bleService = BleService.getInstance();
@@ -91,7 +93,11 @@ export const DashboardScreen: React.FC = () => {
         }
       >
         {/* App Bar & Link / Cancel Button */}
-        <Header onOpenScanner={handleOpenScanner} onDisconnect={handleDisconnect} />
+        <Header
+          onOpenScanner={handleOpenScanner}
+          onDisconnect={handleDisconnect}
+          onOpenDiagnostics={() => setIsDiagnosticsVisible(true)}
+        />
 
         {/* Pairing Assistant Notice Card when Disconnected */}
         {connectionState !== 'connected' && (
@@ -154,6 +160,12 @@ export const DashboardScreen: React.FC = () => {
         onRefreshScan={() => bleService.startScan(true)}
         onStopScan={() => bleService.stopScan()}
         onCancelConnection={handleDisconnect}
+      />
+
+      {/* Full GATT & Telemetry Diagnostics Inspector */}
+      <GattDiagnosticsModal
+        visible={isDiagnosticsVisible}
+        onClose={() => setIsDiagnosticsVisible(false)}
       />
     </SafeAreaView>
   );

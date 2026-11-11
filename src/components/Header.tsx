@@ -5,9 +5,10 @@ import { useBudsStore } from '../store/useBudsStore';
 interface HeaderProps {
   onOpenScanner: () => void;
   onDisconnect: () => void;
+  onOpenDiagnostics: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect, onOpenDiagnostics }) => {
   const { connectionState, connectedDevice, firmwareVersion } = useBudsStore();
 
   const getStatusColor = () => {
@@ -89,7 +90,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenScanner, onDisconnect }) =
         </View>
       </View>
 
-      {renderActionButton()}
+      <View style={styles.actionButtonGroup}>
+        <TouchableOpacity
+          style={styles.diagBtn}
+          onPress={onOpenDiagnostics}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.diagBtnText}>🩺</Text>
+        </TouchableOpacity>
+        {renderActionButton()}
+      </View>
     </View>
   );
 };
@@ -137,6 +147,24 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     marginLeft: 8,
+  },
+  actionButtonGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  diagBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#161b22',
+    borderWidth: 1,
+    borderColor: '#30363d',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diagBtnText: {
+    fontSize: 16,
   },
   actionButton: {
     paddingHorizontal: 16,

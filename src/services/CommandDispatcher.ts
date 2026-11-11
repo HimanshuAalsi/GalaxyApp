@@ -386,6 +386,9 @@ export class CommandDispatcher {
     useBudsStore.getState().setSpatialAudio(spatialAudio);
     useBudsStore.getState().setEqPreset(eqPreset);
     useBudsStore.getState().updateTouchControls({ isAllLocked: isTouchLocked });
+
+    // Respond with status acknowledgement so earbuds firmware does not timeout
+    this.sendCommand(PROTOCOL.MSG_ID.STATUS_UPDATED, [0x00]).catch(() => {});
   }
 
   private parseNoiseControlUpdate(payload: Uint8Array): void {
